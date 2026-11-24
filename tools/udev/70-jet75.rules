@@ -1,0 +1,4 @@
+# MCHOSE Jet75-II: let members of 'plugdev' (and the logged-in user) use the HID interfaces
+# needed by tools/ and demos/ (config channel, raw reports). Install with:
+#   sudo cp tools/udev/70-jet75.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="41e4", ATTRS{idProduct}=="211a", MODE="0660", GROUP="plugdev", TAG+="uaccess"

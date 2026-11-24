@@ -1,0 +1,65 @@
+#!/bin/sh
+# Load / unload / inspect the Jet75-II NKRO descriptor fix (HID-BPF). load/unload need root.
+#   sudo tools/hid-bpf/jet75-hid-fix load      # attach to the connected keyboard
+#   sudo tools/hid-bpf/jet75-hid-fix unload    # restore the original descriptor
+#        tools/hid-bpf/jet75-hid-fix status    # show whether the live descriptor is fixed
+set -e
+HERE=$(cd "$(dirname "$0")" && pwd)
+PIN_DIR=/sys/fs/bpf/jet75-hid-fix
+
+find_dev() {   # HID device of interface 2 (descriptor starting with Report ID 1 keyboard bitmap)
+	for d in /sys/bus/hid/devices/0003:41E4:211A.*; do
+		[ -e "$d/report_descriptor" ] || continue
+		if [ "$(head -c 8 "$d/report_descriptor" | od -An -tx1 | tr -d ' \n')" = "05010906a1018501" ]; then
+			echo "$d"; return 0
+		fi
+	done
+	return 1
+}
+
+case "$1" in
+load)
+	dev=$(find_dev) || { echo "Jet75-II interface 2 not found"; exit 1; }
+	id=$((0x${dev##*.}))
+	mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf
+	mkdir -p "$PIN_DIR"
+	for pin in "$PIN_DIR"/hid*; do   # drop links of keyboards that were unplugged meanwhile
+		[ -e "$pin" ] || continue
+		n=${pin##*/hid}
+		ls /sys/bus/hid/devices/*."$(printf %04X "$n")" >/dev/null 2>&1 || rm -f "$pin"
+	done
+	[ -e "$PIN_DIR/hid$id" ] && { echo "already loaded for HID device $id"; exit 0; }
+	"$HERE/jet75-hid-fix-loader" "$id" "$PIN_DIR/hid$id"
+	;;
+unload)
+	if ls "$PIN_DIR"/hid* >/dev/null 2>&1; then rm -f "$PIN_DIR"/hid*; echo "fix removed"; else echo "not loaded"; fi
+	;;
+status)
+	rc=0
+	if dev=$(find_dev); then
+		byte=$(dd if="$dev/report_descriptor" bs=1 skip=23 count=1 2>/dev/null | od -An -tx1 | tr -d ' ')
+		case "$byte" in
+		02) echo "descriptor : fixed - NKRO report is Input(Variable) on $(basename "$dev")";;
+		00) echo "descriptor : ORIGINAL (broken) - NKRO report is Input(Array) on $(basename "$dev")"; rc=1;;
+		*)  echo "descriptor : unknown byte $byte on $(basename "$dev")"; rc=1;;
+		esac
+		id=$((0x${dev##*.}))
+		if [ -e "$PIN_DIR/hid$id" ]; then echo "bpf link   : pinned at $PIN_DIR/hid$id";
+		elif [ -r "$PIN_DIR" ] 2>/dev/null; then echo "bpf link   : not pinned for HID device $id"; rc=1;
+		else echo "bpf link   : (cannot read $PIN_DIR without root)"; fi
+	else
+		echo "descriptor : keyboard not connected"; rc=1
+	fi
+	[ -x /usr/local/sbin/jet75-hid-fix ] && [ -x /usr/local/sbin/jet75-hid-fix-loader ] \
+		&& echo "installed  : /usr/local/sbin/jet75-hid-fix{,-loader}" || echo "installed  : no (sudo make -C tools/hid-bpf install)"
+	[ -e /etc/udev/rules.d/71-jet75-hid-fix.rules ] && echo "autoload   : udev rule present" || echo "autoload   : no udev rule (tools/udev/71-jet75-hid-fix.rules)"
+	if [ -e /etc/udev/rules.d/70-jet75.rules ]; then
+		echo "access     : udev rule present ($(ls -l /dev/hidraw* 2>/dev/null | grep -c plugdev) plugdev hidraw nodes)"
+	else
+		echo "access     : no udev rule (tools/udev/70-jet75.rules)"
+	fi
+	exit $rc
+	;;
+*)
+	echo "usage: $0 load|unload|status"; exit 2;;
+esac

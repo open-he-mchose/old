@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jet75 Depth Viewer</title>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --text: #1d2130; --muted: #6b7180; --line: #d9dce3;
+  --key: #eceef2; --key-border: #c9cdd6; --accent: #2f6fed; --danger: #d6453d;
+  --fill-a: #39b36b; --fill-b: #f2b134; --fill-c: #e5533d; --act: #1d2130;
+  --shadow: 0 1px 2px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121418; --panel: #1b1e24; --text: #e7e9ee; --muted: #9096a3; --line: #2c3038;
+    --key: #23272f; --key-border: #343944; --accent: #5b8cff; --danger: #ff6b61;
+    --act: #e7e9ee; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121418; --panel: #1b1e24; --text: #e7e9ee; --muted: #9096a3; --line: #2c3038;
+  --key: #23272f; --key-border: #343944; --accent: #5b8cff; --danger: #ff6b61;
+  --act: #e7e9ee; --shadow: none;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 600; }
+button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { border-color: var(--danger); color: var(--danger); }
+button:disabled { opacity: .45; cursor: default; }
+label.toggle { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+#status { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+main { padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 300px; }
+@media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; box-shadow: var(--shadow); min-width: 0; }
+#kbwrap { overflow-x: auto; }
+#kb { position: relative; --u: 54px; width: calc(var(--u) * 16); height: calc(var(--u) * 6.25); margin: 0 auto; }
+.key { position: absolute; border-radius: 6px; background: var(--key); border: 1px solid var(--key-border);
+  overflow: hidden; cursor: pointer; user-select: none; }
+.key .fill { position: absolute; left: 0; right: 0; top: 0; height: 0%;
+  background: var(--fill-a); opacity: .9; }
+.key .act { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--act); opacity: .35; }
+.key .peak { position: absolute; left: 0; right: 0; border-top: 2px solid var(--danger); opacity: 0; }
+.key .lbl { position: absolute; left: 5px; top: 3px; font-size: 11px; font-weight: 600; }
+.key .mm { position: absolute; right: 4px; bottom: 3px; font-size: 11px; color: var(--text);
+  font-variant-numeric: tabular-nums; background: var(--key); border-radius: 3px; padding: 0 3px; }
+.key .lbl { background: var(--key); border-radius: 3px; padding: 0 2px; }
+.key.down { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.key.sel { outline: 2px solid var(--text); outline-offset: 1px; }
+.key.unseen .lbl { color: var(--muted); }
+#others { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+#others .key { position: relative; width: 70px; height: 54px; }
+.legend { color: var(--muted); font-size: 12px; margin-top: 12px; }
+#detail h2 { margin: 0 0 8px; font-size: 22px; }
+#detail dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; }
+#detail dt { color: var(--muted); }
+#detail dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+canvas { width: 100%; height: 160px; display: block; }
+#log { margin-top: 12px; font: 12px/1.4 ui-monospace, monospace; color: var(--muted);
+  max-height: 140px; overflow: auto; white-space: pre-wrap; }
+.warn { color: var(--danger); }
+@media (max-width: 600px) { #kb { --u: 40px; } header { padding: 12px 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Jet75-II · key depth</h1>
+  <button id="connect" class="primary">Connect keyboard</button>
+  <button id="stop" class="danger" disabled>Stop</button>
+  <button id="demo">Demo without keyboard</button>
+  <button id="resetPeaks">Reset peaks</button>
+  <label class="toggle"><input type="checkbox" id="precise" checked> precise depth (firmware curve, no lag; needs curves.js)</label>
+  <span id="status">not connected</span>
+</header>
+<main>
+  <section class="card">
+    <div id="kbwrap"><div id="kb"></div></div>
+    <div id="others"></div>
+    <div class="legend">
+      Fill = current depth (top to bottom), dashed line = the key's actuation point,
+      red line = maximum depth since the last reset, blue frame = the firmware considers the key pressed.
+      The keyboard sends data only when travel changes, at most ~40 packets/s for all keys together.
+    </div>
+    <div id="log"></div>
+  </section>
+  <aside class="card" id="detail">
+    <h2 id="dName">—</h2>
+    <dl>
+      <dt>Travel</dt><dd id="dTravel">—</dd>
+      <dt>Peak</dt><dd id="dPeak">—</dd>
+      <dt>Actuation</dt><dd id="dAct">—</dd>
+      <dt>Rapid Trigger ↓ / ↑</dt><dd id="dRt">—</dd>
+      <dt>Mode</dt><dd id="dMode">—</dd>
+      <dt>State</dt><dd id="dState">—</dd>
+      <dt>Sensor (ADC)</dt><dd id="dAdc">—</dd>
+      <dt>Sensor at rest</dt><dd id="dRest">—</dd>
+      <dt>Calibration</dt><dd id="dCal">—</dd>
+      <dt>Switch max travel</dt><dd id="dMax">—</dd>
+    </dl>
+    <canvas id="chart" width="600" height="320"></canvas>
+    <div class="legend">Last 10 seconds of the selected key. Click a key to select it.</div>
+  </aside>
+</main>
+<script src="curves.js"></script>
+<script>
+"use strict";
+// ---- layout (Jet75-II as reported by the keyboard: 80 keys; physical widths approximate) ----
+const H = n => "1000" + n.toString(16).padStart(2, "0");      // plain HID usage -> [10 00 xx]
+const M = bit => "10" + bit.toString(16).padStart(2, "0") + "00"; // modifier -> [10 bb 00]
+const FN = "f0ff01";
+const ROWS = [
+  [["Esc",H(0x29)],{g:.25},["F1",H(0x3a)],["F2",H(0x3b)],["F3",H(0x3c)],["F4",H(0x3d)],{g:.25},
+   ["F5",H(0x3e)],["F6",H(0x3f)],["F7",H(0x40)],["F8",H(0x41)],{g:.25},["F9",H(0x42)],["F10",H(0x43)],
+   ["F11",H(0x44)],["F12",H(0x45)],{g:.25},["PrtSc",H(0x46)],["Del",H(0x4c)]],
+  [["`",H(0x35)],["1",H(0x1e)],["2",H(0x1f)],["3",H(0x20)],["4",H(0x21)],["5",H(0x22)],["6",H(0x23)],
+   ["7",H(0x24)],["8",H(0x25)],["9",H(0x26)],["0",H(0x27)],["-",H(0x2d)],["=",H(0x2e)],["Backspace",H(0x2a),2],["PgUp",H(0x4b)]],
+  [["Tab",H(0x2b),1.5],["Q",H(0x14)],["W",H(0x1a)],["E",H(0x08)],["R",H(0x15)],["T",H(0x17)],["Y",H(0x1c)],
+   ["U",H(0x18)],["I",H(0x0c)],["O",H(0x12)],["P",H(0x13)],["[",H(0x2f)],["]",H(0x30)],["\\",H(0x31),1.5],["PgDn",H(0x4e)]],
+  [["Caps",H(0x39),1.75],["A",H(0x04)],["S",H(0x16)],["D",H(0x07)],["F",H(0x09)],["G",H(0x0a)],["H",H(0x0b)],
+   ["J",H(0x0d)],["K",H(0x0e)],["L",H(0x0f)],[";",H(0x33)],["'",H(0x34)],["Enter",H(0x28),2.25]],
+  [["Shift",M(0x02),2.25],["Z",H(0x1d)],["X",H(0x1b)],["C",H(0x06)],["V",H(0x19)],["B",H(0x05)],["N",H(0x11)],
+   ["M",H(0x10)],[",",H(0x36)],[".",H(0x37)],["/",H(0x38)],["Shift",M(0x20),1.75],["↑",H(0x52)]],
+  [["Ctrl",M(0x01),1.25],["Win",M(0x08),1.25],["Alt",M(0x04),1.25],["Space",H(0x2c),7.25],["Fn",FN],
+   ["Ctrl",M(0x10)],["←",H(0x50)],["↓",H(0x51)],["→",H(0x4f)]],
+];
+
+// ---- state ----
+const keys = new Map();   // code -> {el, fill, act, peak, mm, name, ...live values}
+let selected = null, dev = null, profile = 0, streaming = false, demoTimer = null;
+let pktCount = 0, pktRate = 0;
+const $ = id => document.getElementById(id);
+const log = (msg, warn) => {
+  const line = document.createElement("div");
+  if (warn) line.className = "warn";
+  line.textContent = new Date().toLocaleTimeString() + "  " + msg;
+  $("log").prepend(line);
+};
+
+function makeKey(name, code, parent, x, y, w) {
+  const el = document.createElement("div");
+  el.className = "key unseen";
+  if (x !== undefined) {
+    el.style.left = `calc(var(--u) * ${x} + 2px)`;
+    const yy = y + (y > 0 ? 0.25 : 0); // gap below the function-key row
+    el.style.top = `calc(var(--u) * ${yy} + 2px)`;
+    el.style.width = `calc(var(--u) * ${w} - 4px)`;
+    el.style.height = `calc(var(--u) - 4px)`;
+  }
+  el.innerHTML = '<div class="fill"></div><div class="act"></div><div class="peak"></div><span class="lbl"></span><span class="mm"></span>';
+  el.querySelector(".lbl").textContent = name;
+  parent.appendChild(el);
+  const k = { name, code, el, fill: el.querySelector(".fill"), actEl: el.querySelector(".act"),
+    peakEl: el.querySelector(".peak"), mmEl: el.querySelector(".mm"),
+    travel: 0, peak: 0, max: 3.41, adc: null, rest: null, state: 0, calib: null,
+    act: null, rtDn: null, rtUp: null, mode: null, hist: [], dirty: true };
+  el.addEventListener("click", () => select(code));
+  keys.set(code, k);
+  return k;
+}
+
+function buildLayout() {
+  const kb = $("kb");
+  ROWS.forEach((row, y) => {
+    let x = 0;
+    row.forEach(item => {
+      if (item.g) { x += item.g; return; }
+      const [name, code, w = 1] = item;
+      makeKey(name, code, kb, x, y, w);
+      x += w;
+    });
+  });
+}
+
+function keyFor(code, fallbackName) {
+  return keys.get(code) || makeKey(fallbackName || code, code, $("others"));
+}
+
+// ---- rendering ----
+function depthColor(f) {
+  return f < 0.5 ? "var(--fill-a)" : f < 0.85 ? "var(--fill-b)" : "var(--fill-c)";
+}
+function render() {
+  for (const k of keys.values()) {
+    if (!k.dirty) continue;
+    k.dirty = false;
+    const f = Math.max(0, Math.min(1, k.travel / (k.max || 3.41)));
+    k.fill.style.height = (f * 100).toFixed(1) + "%";
+    k.fill.style.background = depthColor(f);
+    k.mmEl.textContent = k.adc === null ? "" : k.travel.toFixed(2);
+    k.el.classList.toggle("down", k.state === 1);
+    k.el.classList.toggle("unseen", k.adc === null);
+    if (k.act !== null) k.actEl.style.top = (100 * k.act / k.max).toFixed(1) + "%";
+    k.peakEl.style.opacity = k.peak > 0 ? 1 : 0;
+    k.peakEl.style.top = (100 * Math.min(1, k.peak / k.max)).toFixed(1) + "%";
+  }
+  if (selected) renderDetail(keys.get(selected));
+  requestAnimationFrame(render);
+}
+function fmt(v, unit = "") { return v === null || v === undefined ? "—" : v + unit; }
+function renderDetail(k) {
+  $("dName").textContent = k.name;
+  $("dTravel").textContent = k.adc === null ? "—" : k.travel.toFixed(2) + " mm";
+  $("dPeak").textContent = k.peak.toFixed(2) + " mm";
+  $("dAct").textContent = k.act === null ? "—" : k.act.toFixed(2) + " mm";
+  $("dRt").textContent = k.rtDn === null ? "—" : k.rtDn.toFixed(2) + " / " + k.rtUp.toFixed(2) + " mm";
+  $("dMode").textContent = fmt(k.mode);
+  $("dState").textContent = k.adc === null ? "—" : (k.state === 1 ? "pressed" : "released");
+  $("dAdc").textContent = fmt(k.adc);
+  $("dRest").textContent = fmt(k.rest);
+  $("dCal").textContent = k.calib === null ? "—" : (k.calib === 0xff ? "done (ff)" : "in progress (" + k.calib.toString(16) + ")");
+  $("dMax").textContent = k.max.toFixed(2) + " mm";
+  drawChart(k);
+}
+function drawChart(k) {
+  const c = $("chart"), g = c.getContext("2d"), W = c.width, Hh = c.height;
+  const css = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, W, Hh);
+  const now = performance.now(), span = 10000, pad = 24;
+  const y = mm => pad / 2 + (Hh - pad) * Math.min(1, mm / k.max);
+  g.strokeStyle = css.getPropertyValue("--line"); g.lineWidth = 1;
+  g.fillStyle = css.getPropertyValue("--muted"); g.font = "20px system-ui";
+  for (const mm of [0, 1, 2, 3]) { g.beginPath(); g.moveTo(0, y(mm)); g.lineTo(W, y(mm)); g.stroke(); g.fillText(mm + " mm", 4, y(mm) + (mm === 0 ? 20 : -4)); }
+  if (k.act !== null) {
+    g.setLineDash([8, 6]); g.strokeStyle = css.getPropertyValue("--act");
+    g.beginPath(); g.moveTo(0, y(k.act)); g.lineTo(W, y(k.act)); g.stroke(); g.setLineDash([]);
+  }
+  const pts = k.hist.filter(p => now - p.t < span);
+  g.strokeStyle = css.getPropertyValue("--accent"); g.lineWidth = 3; g.beginPath();
+  let started = false, prev = null;
+  for (const p of pts) {
+    const x = W * (1 - (now - p.t) / span);
+    if (!started) { g.moveTo(x, y(p.mm)); started = true; }
+    else { g.lineTo(x, y(prev.mm)); g.lineTo(x, y(p.mm)); } // step: value holds until next packet
+    prev = p;
+  }
+  if (prev) g.lineTo(W, y(prev.mm));
+  g.stroke();
+}
+function select(code) {
+  if (selected) keys.get(selected).el.classList.remove("sel");
+  selected = code;
+  keys.get(code).el.classList.add("sel");
+}
+
+// ---- incoming samples (device or demo) ----
+// Firmware curve (tools/extract_curves.py -> curves.js): normalized sensor value -> travel.
+const CURVE = (() => {
+  const c = window.JET75_CURVES && window.JET75_CURVES["0"];
+  if (!c) return null;
+  let m = 0;
+  return c.curve.map(v => (m = Math.max(m, v)));
+})();
+function preciseDepth(norm, adc, rest) {
+  if (rest - adc < 20) return 0;               // back at rest (norm is not refreshed there)
+  if (!CURVE || norm < CURVE[9]) return 0;
+  let lo = 0, hi = CURVE.length;               // first index with CURVE[i] > norm
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (CURVE[mid] <= norm) lo = mid + 1; else hi = mid; }
+  if (lo >= CURVE.length) return CURVE.length / 100;
+  const a = CURVE[lo - 1], b = CURVE[lo];
+  return (lo + (norm - a) / Math.max(1, b - a)) / 100;
+}
+function applySample(s) {
+  const k = keyFor(s.code, s.name);
+  let mm = s.travel;
+  if (s.adc !== null && s.rest) {
+    if ($("precise").checked && CURVE && s.norm !== undefined) mm = preciseDepth(s.norm, s.adc, s.rest);
+    else if (s.rest - s.adc < 40) mm = 0;      // firmware travel field lags on fast release
+  }
+  k.travel = mm; k.max = s.max || k.max; k.adc = s.adc; k.rest = s.rest; k.state = s.state; k.calib = s.calib;
+  k.peak = Math.max(k.peak, mm);
+  const t = performance.now();
+  k.hist.push({ t, mm });
+  while (k.hist.length && t - k.hist[0].t > 12000) k.hist.shift();
+  k.dirty = true;
+  pktCount++;
+  if (!selected) select(k.code);
+}
+function parseStream(b) {
+  const be = i => b[i] << 8 | b[i + 1];
+  const code = [b[1], b[2], b[3]].map(v => v.toString(16).padStart(2, "0")).join("");
+  return { code, travel: be(6) / 100, norm: be(4), state: b[9], calib: b[10], max: be(14) / 100 || 3.41,
+    adc: be(16), rest: be(18) * 4 };
+}
+
+// ---- protocol over WebHID (see docs/protocol.md) ----
+class Jet75 {
+  constructor(hid) {
+    this.hid = hid; this.pending = null; this.queue = Promise.resolve(); this.onStream = null;
+    hid.addEventListener("inputreport", e => this.onReport(new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength)));
+  }
+  onReport(b) {
+    if (b[0] === 0xA0) { this.onStream && this.onStream(b); return; }
+    const p = this.pending;
+    if (!p) return;
+    if (b[0] === 0xAB) { this.pending = null; clearTimeout(p.timer); p.reject(new Error("device error (cserr/unknw)")); return; }
+    if (b[0] === 0xAA && b[1] === p.cmd && b[5] === (p.off & 255) && b[6] === (p.off >> 8 & 255)) {
+      this.pending = null; clearTimeout(p.timer); p.resolve(b.slice(8, 8 + p.size));
+    }
+  }
+  tx(cmd, off, size, data = []) {
+    const run = () => new Promise((resolve, reject) => {
+      const body = [size, off & 255, off >> 8 & 255, 0, ...data];
+      const pkt = new Uint8Array(64);
+      pkt.set([0x55, cmd, 0, body.reduce((a, v) => a + v, 0) & 255], 0);
+      pkt.set(body, 4);
+      this.pending = { cmd, off, size, resolve, reject,
+        timer: setTimeout(() => { this.pending = null; reject(new Error("no reply to command 0x" + cmd.toString(16))); }, 1500) };
+      this.hid.sendReport(0, pkt).catch(err => { this.pending = null; reject(err); });
+    });
+    this.queue = this.queue.catch(() => {}).then(run);
+    return this.queue;
+  }
+  async read(cmd, off, len) {
+    const out = [];
+    for (let pos = 0; pos < len; pos += 56) out.push(...await this.tx(cmd, off + pos, Math.min(56, len - pos)));
+    return Uint8Array.from(out);
+  }
+  async write64(cmd, off, d) { await this.tx(cmd, off, 56, [...d.slice(0, 56)]); await this.tx(cmd, off + 8, 56, [...d.slice(8, 64)]); }
+  async info() { const b = await this.read(3, 0, 56); return { fw: (b[1] << 8 | b[0]).toString(16), build: String.fromCharCode(...b.slice(2)).split("\0")[0] }; }
+  async activeProfile() { const b = await this.read(4, 0, 56); const idx = b[0] < b[1] ? b[0] : 0; const p = b[2 + idx]; return p < 4 ? p : 0; }
+  async getFunc(p) { return await this.read(5, 64 * p, 64); }
+  async setDebug(p, on) {
+    const fc = await this.getFunc(p);
+    if (fc[2] !== 0xAA || fc[3] !== 0xBB) throw new Error("no AA BB marker in FuncConfig - write cancelled");
+    const nw = Uint8Array.from(fc); nw[7] = on ? (fc[7] | 8) : (fc[7] & 0xF7);
+    if (nw[7] === fc[7]) return;
+    await this.write64(6, 64 * p, nw);
+    const chk = await this.getFunc(p);
+    if (chk.some((v, i) => v !== nw[i])) throw new Error("FuncConfig read-back mismatch");
+  }
+  async keySettings(p) {
+    const km = await this.read(8, 512 * (p * 4), 3 * 80), tr = await this.read(0xA0, 1024 * p, 8 * 80);
+    const res = [];
+    for (let i = 0; i < 80; i++) {
+      const code = [...km.slice(3 * i, 3 * i + 3)].map(v => v.toString(16).padStart(2, "0")).join("");
+      const e = tr.slice(8 * i, 8 * i + 8), v9 = (lo, hi) => ((lo | (hi & 1) << 8) + 1) / 100;
+      res.push({ code, act: v9(e[2], e[3]), rtDn: v9(e[4], e[5]), rtUp: v9(e[6], e[7]), mode: e[1] & 15 });
+    }
+    return res;
+  }
+}
+
+const MODES = { 1: "normal", 2: "Rapid Trigger" };
+async function connect() {
+  if (!("hid" in navigator)) { log("WebHID not available: use Chrome/Chromium/Edge on http://localhost or file://", true); return; }
+  stopDemo();
+  try {
+    const list = await navigator.hid.requestDevice({ filters: [{ vendorId: 0x41E4, productId: 0x211A, usagePage: 1, usage: 0 }] });
+    const hid = list.find(d => d.collections.some(c => c.usagePage === 1 && c.usage === 0));
+    if (!hid) { log("no keyboard selected", true); return; }
+    if (!hid.opened) await hid.open();
+    dev = new Jet75(hid);
+    dev.onStream = b => applySample(parseStream(b));
+    const inf = await dev.info();
+    profile = await dev.activeProfile();
+    for (const s of await dev.keySettings(profile)) {
+      const k = keys.get(s.code);
+      if (k) { Object.assign(k, { act: s.act, rtDn: s.rtDn, rtUp: s.rtUp, mode: MODES[s.mode] || s.mode, dirty: true }); }
+    }
+    await dev.setDebug(profile, true);
+    streaming = true;
+    $("connect").disabled = true; $("stop").disabled = false;
+    $("status").textContent = `firmware ${inf.fw} · profile ${profile} · stream on`;
+    log(`connected: firmware ${inf.fw} (${inf.build}), profile ${profile}; debugMode on`);
+  } catch (e) {
+    log("error: " + e.message, true);
+  }
+}
+async function stop() {
+  if (!dev) return;
+  $("stop").disabled = true;
+  try { await dev.setDebug(profile, false); log("debugMode off, FuncConfig restored"); }
+  catch (e) { log("could not turn debugMode off: " + e.message + " (it resets itself when the keyboard is replugged)", true); }
+  try { await dev.hid.close(); } catch (e) {}
+  dev = null; streaming = false;
+  $("connect").disabled = false;
+  $("status").textContent = "disconnected";
+}
+navigator.hid && navigator.hid.addEventListener("disconnect", e => {
+  if (dev && e.device === dev.hid) { log("keyboard disconnected", true); dev = null; streaming = false; $("connect").disabled = false; $("stop").disabled = true; $("status").textContent = "disconnected"; }
+});
+window.addEventListener("beforeunload", e => {
+  if (streaming && dev) { dev.setDebug(profile, false).catch(() => {}); e.preventDefault(); e.returnValue = ""; }
+});
+
+// ---- demo mode: synthetic presses, no device needed ----
+function startDemo() {
+  if (dev) return;
+  if (demoTimer) { stopDemo(); return; }
+  const codes = [...keys.keys()];
+  const active = new Map();
+  for (const k of keys.values()) if (k.act === null) Object.assign(k, { act: 1.5, rtDn: .3, rtUp: .3, mode: "demo" });
+  demoTimer = setInterval(() => {
+    if (Math.random() < 0.15 && active.size < 6) {
+      const c = codes[Math.floor(Math.random() * codes.length)];
+      if (!active.has(c)) active.set(c, { t: 0, depth: 1 + Math.random() * 2.41, dur: 10 + Math.random() * 30 });
+    }
+    for (const [c, a] of active) {
+      a.t++;
+      const ph = a.t / a.dur, mm = ph >= 1 ? 0 : a.depth * Math.sin(Math.PI * ph);
+      applySample({ code: c, travel: Math.round(mm * 100) / 100, state: mm > 1.5 ? 1 : 0xff, calib: 0xff, max: 3.41,
+        adc: Math.round(12600 - mm * 1700), rest: 12600 });
+      if (ph >= 1) active.delete(c);
+    }
+  }, 25);
+  $("demo").textContent = "Stop demo";
+  $("status").textContent = "demo mode (synthetic data)";
+}
+function stopDemo() {
+  if (!demoTimer) return;
+  clearInterval(demoTimer); demoTimer = null;
+  $("demo").textContent = "Demo without keyboard";
+  if (!dev) $("status").textContent = "not connected";
+}
+
+setInterval(() => {
+  pktRate = pktCount; pktCount = 0;
+  if (streaming) $("status").textContent = $("status").textContent.replace(/ · \d+ pkt\/s$/, "") + ` · ${pktRate} pkt/s`;
+}, 1000);
+
+$("connect").onclick = connect;
+$("stop").onclick = stop;
+$("demo").onclick = startDemo;
+$("resetPeaks").onclick = () => { for (const k of keys.values()) { k.peak = 0; k.dirty = true; } };
+buildLayout();
+select(H(0x04));
+requestAnimationFrame(render);
+if (!("hid" in navigator)) log("This browser does not support WebHID. Open the page in Chrome/Chromium/Edge.", true);
+if (new URLSearchParams(location.search).has("demo")) startDemo();
+</script>
+</body>
+</html>

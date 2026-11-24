@@ -1,0 +1,22 @@
+# Vendor material (firmware, updaters, downloaded web driver): kept locally, not versioned
+samples/
+work/firmware/
+work/webdriver-modules/
+# Data extracted from vendor firmware (tools/extract_curves.py)
+tools/jet75_curves.json
+demos/web-depth-visualizer/curves.js
+# Settings backups written by jet75ctl.py
+backups/
+# Generated from vendor firmware / Ghidra runs (re-creatable, see tools/ghidra/README.md)
+work/ghidra-proj/
+work/ghidra-out/
+# Raw USB / key recordings contain everything typed during the tests
+captures/
+# HID-BPF build artefacts (make -C tools/hid-bpf)
+tools/hid-bpf/vmlinux.h
+tools/hid-bpf/*.o
+tools/hid-bpf/*.skel.h
+tools/hid-bpf/jet75-hid-fix-loader
+# Python
+__pycache__/
+*.pyc

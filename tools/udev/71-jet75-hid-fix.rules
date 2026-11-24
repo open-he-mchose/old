@@ -1,0 +1,5 @@
+# Load the Jet75-II NKRO descriptor fix (HID-BPF) whenever the keyboard is plugged in.
+# Install: sudo make -C tools/hid-bpf install && sudo cp tools/udev/71-jet75-hid-fix.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload
+# The script finds interface 2 itself and is a no-op if the fix is already attached.
+ACTION=="add", SUBSYSTEM=="hid", ENV{HID_ID}=="0003:000041E4:0000211A", RUN+="/usr/local/sbin/jet75-hid-fix load"
